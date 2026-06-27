@@ -292,7 +292,8 @@ func (i *insertExecutor) queryRows(ctx context.Context, query string, args []dri
 	if stmtQueryCtx, ok := stmt.(driver.StmtQueryContext); ok {
 		rows, err = stmtQueryCtx.QueryContext(ctx, args)
 	} else {
-		dargs, err := namedValuesToValues(args)
+		var dargs []driver.Value
+		dargs, err = namedValuesToValues(args)
 		if err != nil {
 			stmt.Close()
 			return nil, err
