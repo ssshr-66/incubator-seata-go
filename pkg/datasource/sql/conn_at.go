@@ -112,7 +112,10 @@ func (c *ATConn) ExecContext(ctx context.Context, query string, args []driver.Na
 				return nil, err
 			})
 
-		return ret, err
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
 	})
 	if err != nil {
 		return nil, err
@@ -173,7 +176,10 @@ func (c *ATConn) QueryContext(ctx context.Context, query string, args []driver.N
 				return nil, err
 			})
 
-		return ret, err
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
 	})
 	if err != nil {
 		return nil, err
