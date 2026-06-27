@@ -63,7 +63,7 @@ func (g *GettyRemoting) SendSync(msg message.RpcMessage, s getty.Session, callba
 		log.Errorf("send message: %#v, session: %s", msg, s.Stat())
 		return nil, err
 	}
-	return result, err
+	return result, nil
 }
 
 func (g *GettyRemoting) SendAsync(msg message.RpcMessage, s getty.Session, callback callbackMethod) error {
