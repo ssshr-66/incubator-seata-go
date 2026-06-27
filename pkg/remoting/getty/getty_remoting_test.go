@@ -19,6 +19,7 @@ package getty
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -186,4 +187,49 @@ func TestGettyRemoting_SendAsync_NoSession(t *testing.T) {
 
 	err := newGettyRemoting().SendAsync(message.RpcMessage{ID: 1}, nil, nil)
 	assert.EqualError(t, err, "session is closed")
+}
+
+func TestGettyRemoting_NotifyRpcMessageResponseSignalsWaitingFuture(t *testing.T) {
+	gettyRemoting := newGettyRemoting()
+	request := message.RpcMessage{ID: 1}
+	messageFuture := message.NewMessageFuture(request)
+	gettyRemoting.futures.Store(request.ID, messageFuture)
+
+	gettyRemoting.NotifyRpcMessageResponse(message.RpcMessage{
+		ID:   request.ID,
+		Body: "ok",
+	})
+
+	assert.Equal(t, "ok", messageFuture.Response)
+	select {
+	case <-messageFuture.Done:
+	default:
+		t.Fatal("expected NotifyRpcMessageResponse to signal the waiting future")
+	}
+}
+
+func TestGettyRemoting_NotifyRpcMessageResponseDoesNotBlockWhenAlreadySignaled(t *testing.T) {
+	gettyRemoting := newGettyRemoting()
+	request := message.RpcMessage{ID: 1}
+	messageFuture := message.NewMessageFuture(request)
+	messageFuture.Done <- struct{}{}
+	gettyRemoting.futures.Store(request.ID, messageFuture)
+
+	done := make(chan struct{})
+	go func() {
+		gettyRemoting.NotifyRpcMessageResponse(message.RpcMessage{
+			ID:   request.ID,
+			Body: "late-response",
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("NotifyRpcMessageResponse blocked when the future was already signaled")
+	}
+
+	assert.Equal(t, "late-response", messageFuture.Response)
+	assert.Len(t, messageFuture.Done, 1)
 }
