@@ -24,6 +24,7 @@ on:
     branches: [master]
     paths:
       - "**.go"
+      - "**/testdata/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/unit-test.yml"
@@ -31,6 +32,7 @@ on:
     branches: "*"
     paths:
       - "**.go"
+      - "**/testdata/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/unit-test.yml"
