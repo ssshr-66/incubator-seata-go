@@ -295,4 +295,17 @@ db, err := sql.Open(
 
 > PostgreSQL XA 依赖 prepared transaction，使用前需要在 PostgreSQL 服务端开启 `max_prepared_transactions > 0`。
 
+如果使用人大金仓 KingbaseES XA，可使用基于 pgx 的驱动 `seata-xa-kingbase`，DSN 使用 PostgreSQL wire protocol 格式：
+
+```go
+db, err := sql.Open(
+	"seata-xa-kingbase",
+	"postgres://system:password@127.0.0.1:54321/seata_demo?sslmode=disable",
+)
+```
+
+KingbaseES XA 同样要求 `max_prepared_transactions > 0`；修改该参数后需要重启服务。驱动账号需要能查询 `sys_prepared_xacts`，请用实际运行账号验证视图可见性。prepared transaction 不能使用临时表、`WITH HOLD` 游标、`LISTEN`/`UNLISTEN`/`NOTIFY`，并会一直持有锁直到完成二阶段提交或回滚。适配器会给 prepared transaction 的 GID 添加专属前缀，因此 Seata 分支 XID 的 UTF-8 字节数最多为 181。请及时检查并处理 `sys_prepared_xacts` 中遗留的待决事务。
+
+当前适配器复用仓库已有的 pgx v5 驱动，但本仓库尚未在真实 KingbaseES 服务端验证兼容性。部署前请验证实际使用的 KingbaseES、Go 和 pgx 版本组合。`XAResource.Recover` 可以列出本适配器创建的待决分支；Seata-Go 当前没有在 RM 重启后调度 XA Recover 扫描，因此仅实现该方法不代表具备 RM 自动重启恢复能力。
+
 > 完整示例可参考：[XA 模式示例](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic)。

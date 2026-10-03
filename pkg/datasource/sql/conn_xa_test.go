@@ -33,6 +33,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/exec"
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/mock"
@@ -1075,4 +1076,96 @@ func TestXABranchTx_CommitRollbackFailFast(t *testing.T) {
 
 	err = branchTx.Rollback()
 	assert.ErrorIs(t, err, errXABranchLifecycleManaged)
+}
+
+func newMockKingbaseXAConn(t *testing.T, ctrl *gomock.Controller) (*XAConn, *mock.MockDataSourceManager) {
+	t.Helper()
+
+	manager := mock.NewMockDataSourceManager(ctrl)
+	manager.SetBranchType(branch.BranchTypeXA)
+	manager.EXPECT().BranchRegister(gomock.Any(), gomock.Any()).AnyTimes().Return(int64(246), nil)
+	manager.EXPECT().BranchReport(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(
+		func(_ context.Context, param rm.BranchReportParam) error {
+			assert.Equal(t, branch.BranchTypeXA, param.BranchType)
+			assert.EqualValues(t, 246, param.BranchId)
+			assert.EqualValues(t, branch.BranchStatusPhaseoneDone, param.Status)
+			return nil
+		})
+	registerResourceManagerForTest(t, manager)
+
+	driverConn := mock.NewMockTestDriverConn(ctrl)
+	driverTx := mock.NewMockTestDriverTx(ctrl)
+	driverConn.EXPECT().BeginTx(gomock.Any(), gomock.Any()).AnyTimes().Return(driverTx, nil)
+	driverTx.EXPECT().Commit().AnyTimes().Return(nil)
+	driverTx.EXPECT().Rollback().AnyTimes().Return(nil)
+	baseMockConn(driverConn)
+
+	return &XAConn{
+		Conn: &Conn{
+			res:        &DBResource{resourceID: "kingbase://127.0.0.1:54321/seata_demo", dbType: types.DBTypeKingbase},
+			txCtx:      types.NewTxCtx(),
+			targetConn: driverConn,
+			autoCommit: true,
+			dbType:     types.DBTypeKingbase,
+		},
+	}, manager
+}
+
+func TestKingbaseXAConnAutoCommitStatementUsesPreparedTransaction(t *testing.T) {
+	CleanTxHooks()
+	t.Cleanup(CleanTxHooks)
+	oldExecHook := simulateExecContextError
+	oldTimeout := xaConnTimeout
+	xaConnTimeout = time.Minute
+	t.Cleanup(func() {
+		simulateExecContextError = oldExecHook
+		xaConnTimeout = oldTimeout
+	})
+
+	ctrl := gomock.NewController(t)
+	conn, _ := newMockKingbaseXAConn(t, ctrl)
+	var prepareQuery string
+	simulateExecContextError = func(query string) error {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "PREPARE TRANSACTION") {
+			prepareQuery = query
+		}
+		return nil
+	}
+
+	ctx := tm.InitSeataContext(context.Background())
+	tm.SetXID(ctx, "global-xid")
+	_, err := conn.ExecContext(ctx, "UPDATE account SET balance = balance - 1 WHERE id = 1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "PREPARE TRANSACTION 'seata-go:kingbase:global-xid-246'", prepareQuery)
+}
+
+func TestKingbaseXAConnExplicitTransactionUsesPreparedTransaction(t *testing.T) {
+	CleanTxHooks()
+	t.Cleanup(CleanTxHooks)
+	oldExecHook := simulateExecContextError
+	oldTimeout := xaConnTimeout
+	xaConnTimeout = time.Minute
+	t.Cleanup(func() {
+		simulateExecContextError = oldExecHook
+		xaConnTimeout = oldTimeout
+	})
+
+	ctrl := gomock.NewController(t)
+	conn, _ := newMockKingbaseXAConn(t, ctrl)
+	var prepareQuery string
+	simulateExecContextError = func(query string) error {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "PREPARE TRANSACTION") {
+			prepareQuery = query
+		}
+		return nil
+	}
+
+	ctx := tm.InitSeataContext(context.Background())
+	tm.SetXID(ctx, "global-xid")
+	driverTx, err := conn.BeginTx(ctx, driver.TxOptions{})
+	require.NoError(t, err)
+	_, err = conn.ExecContext(context.Background(), "UPDATE account SET balance = balance - 1 WHERE id = 1", nil)
+	require.NoError(t, err)
+	require.NoError(t, driverTx.Commit())
+	assert.Equal(t, "PREPARE TRANSACTION 'seata-go:kingbase:global-xid-246'", prepareQuery)
 }

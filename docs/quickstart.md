@@ -295,4 +295,17 @@ db, err := sql.Open(
 
 > PostgreSQL XA relies on prepared transactions. Set `max_prepared_transactions > 0` on the PostgreSQL server before using this mode.
 
+For KingbaseES XA, use the pgx-based `seata-xa-kingbase` driver with a PostgreSQL-protocol DSN:
+
+```go
+db, err := sql.Open(
+	"seata-xa-kingbase",
+	"postgres://system:password@127.0.0.1:54321/seata_demo?sslmode=disable",
+)
+```
+
+KingbaseES XA also requires `max_prepared_transactions > 0`; restart the server after changing this setting. The database user must be able to query `sys_prepared_xacts`; verify visibility with the same account used by the driver. Prepared transactions cannot use temporary tables, `WITH HOLD` cursors, or `LISTEN`/`UNLISTEN`/`NOTIFY`, and they keep locks until phase two completes. The adapter prefixes its prepared transaction GIDs, so the Seata branch XID must fit within 181 UTF-8 bytes. Check and resolve abandoned entries in `sys_prepared_xacts` promptly.
+
+The adapter uses the existing pgx v5 driver, but this repository has not yet verified it against a live KingbaseES server. Validate the exact KingbaseES, Go, and pgx versions you deploy. `XAResource.Recover` lists this adapter's prepared branches; Seata-Go does not currently schedule XA recovery scans after an RM restart, so this method alone does not provide automatic restart recovery.
+
 > Full example: [XA Example](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic).

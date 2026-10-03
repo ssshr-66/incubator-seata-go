@@ -23,12 +23,14 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"seata.apache.org/seata-go/v2/pkg/rm"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/mock"
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/types"
@@ -150,4 +152,50 @@ func Test_seataXADriver_OpenConnector(t *testing.T) {
 
 	_, ok := fieldVal.(*seataXAConnector)
 	assert.True(t, ok, "need return seata xa connector")
+}
+
+func TestParseKingbaseDBName(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		{
+			name: "URL DSN",
+			dsn:  "postgres://user:secret@db.example:54321/kingbase_db?sslmode=disable",
+		},
+		{
+			name: "keyword DSN",
+			dsn:  "host=db.example port=54321 user=user password=secret dbname=kingbase_db",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dbName, err := parseKingbaseDBName(tt.dsn)
+			require.NoError(t, err)
+			assert.Equal(t, "kingbase_db", dbName)
+		})
+	}
+}
+
+func TestParseKingbaseResourceIDDoesNotExposeCredentials(t *testing.T) {
+	resourceID, err := parseKingbaseResourceID("postgres://test_user:top-secret@db.example:54321/kingbase_db?sslmode=disable&token=hidden")
+	require.NoError(t, err)
+	assert.Equal(t, "kingbase://db.example:54321/kingbase_db", resourceID)
+	assert.NotContains(t, resourceID, "test_user")
+	assert.NotContains(t, resourceID, "top-secret")
+	assert.NotContains(t, resourceID, "hidden")
+	assert.NotContains(t, strings.ToLower(resourceID), "password")
+}
+
+func TestParseConnectorMetadataKingbase(t *testing.T) {
+	metadata, err := parseConnectorMetadata("postgres://user:secret@localhost/kingbase_db", types.DBTypeKingbase)
+	require.NoError(t, err)
+	assert.Equal(t, "kingbase_db", metadata.dbName)
+}
+
+func TestKingbaseXADriverRegistered(t *testing.T) {
+	assert.Contains(t, sql.Drivers(), SeataXAKingbaseDriver)
+	assert.Equal(t, types.DBTypeKingbase, kingbaseDriverDescriptor.dbType)
+	assert.Nil(t, kingbaseDriverDescriptor.newTableMetaCache, "Kingbase XA does not use the AT metadata cache")
 }

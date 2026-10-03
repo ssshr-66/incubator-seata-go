@@ -24,7 +24,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -49,12 +52,15 @@ const (
 	SeataXAMySQLDriver = "seata-xa-mysql"
 	// SeataXAPostgresDriver PostgreSQL driver for XA mode
 	SeataXAPostgresDriver = "seata-xa-postgres"
+	// SeataXAKingbaseDriver KingbaseES driver for XA mode
+	SeataXAKingbaseDriver = "seata-xa-kingbase"
 )
 
 type driverDescriptor struct {
 	dbType            types.DBType
 	target            driver.Driver
 	parseDBName       func(dsn string) (string, error)
+	parseResourceID   func(dsn string) (string, error)
 	newTableMetaCache func(db *sql.DB, dbName string) datasource.TableMetaCache
 }
 
@@ -74,6 +80,12 @@ var (
 		newTableMetaCache: func(db *sql.DB, dbName string) datasource.TableMetaCache {
 			return postgres2.NewTableMetaInstance(db, dbName)
 		},
+	}
+	kingbaseDriverDescriptor = driverDescriptor{
+		dbType:          types.DBTypeKingbase,
+		target:          stdlib.GetDefaultDriver(),
+		parseDBName:     parseKingbaseDBName,
+		parseResourceID: parseKingbaseResourceID,
 	}
 )
 
@@ -111,6 +123,16 @@ func initDriver() {
 			branchType: branch.BranchTypeXA,
 			transType:  types.XAMode,
 			descriptor: postgresDriverDescriptor,
+			target:     stdlib.GetDefaultDriver(),
+			targetName: "pgx",
+		},
+	})
+
+	sql.Register(SeataXAKingbaseDriver, &seataXADriver{
+		seataDriver: &seataDriver{
+			branchType: branch.BranchTypeXA,
+			transType:  types.XAMode,
+			descriptor: kingbaseDriverDescriptor,
 			target:     stdlib.GetDefaultDriver(),
 			targetName: "pgx",
 		},
@@ -203,8 +225,15 @@ func (d *seataDriver) getOpenConnectorProxy(connector driver.Connector, dbType t
 	if err != nil {
 		return nil, fmt.Errorf("parse db name: %w", err)
 	}
+	resourceID := parseResourceID(dataSourceName)
+	if d.descriptor.parseResourceID != nil {
+		resourceID, err = d.descriptor.parseResourceID(dataSourceName)
+		if err != nil {
+			return nil, fmt.Errorf("parse resource id: %w", err)
+		}
+	}
 	options := []dbOption{
-		withResourceID(parseResourceID(dataSourceName)),
+		withResourceID(resourceID),
 		withTarget(db),
 		withBranchType(d.branchType),
 		withDBType(dbType),
@@ -218,7 +247,9 @@ func (d *seataDriver) getOpenConnectorProxy(connector driver.Connector, dbType t
 		return nil, err
 	}
 
-	datasource.RegisterTableCache(dbType, d.descriptor.newTableMetaCache(db, dbName))
+	if d.descriptor.newTableMetaCache != nil {
+		datasource.RegisterTableCache(dbType, d.descriptor.newTableMetaCache(db, dbName))
+	}
 	if err = datasource.GetDataSourceManager(d.branchType).RegisterResource(res); err != nil {
 		log.Errorf("register resource: %v", err)
 		return nil, err
@@ -252,6 +283,28 @@ func parsePostgresDBName(dsn string) (string, error) {
 	return cfg.Database, nil
 }
 
+func parseKingbaseDBName(dsn string) (string, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return "", err
+	}
+	return cfg.Database, nil
+}
+
+func parseKingbaseResourceID(dsn string) (string, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return "", err
+	}
+
+	resourceURL := url.URL{
+		Scheme: "kingbase",
+		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port))),
+		Path:   "/" + cfg.Database,
+	}
+	return resourceURL.String(), nil
+}
+
 func (d *seataDriver) getTargetDriverName() string {
 	return d.targetName
 }
@@ -272,6 +325,12 @@ func parseConnectorMetadata(dataSourceName string, dbType types.DBType) (*connec
 		cfg, err := pgx.ParseConfig(dataSourceName)
 		if err != nil {
 			return nil, fmt.Errorf("parse postgres dsn: %w", err)
+		}
+		return &connectorMetadata{dbName: cfg.Database}, nil
+	case types.DBTypeKingbase:
+		cfg, err := pgx.ParseConfig(dataSourceName)
+		if err != nil {
+			return nil, fmt.Errorf("parse kingbase dsn: %w", err)
 		}
 		return &connectorMetadata{dbName: cfg.Database}, nil
 	default:

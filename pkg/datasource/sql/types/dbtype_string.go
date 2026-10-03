@@ -30,6 +30,7 @@ func _() {
 	_ = x[DBTypePostgreSQL-3]
 	_ = x[DBTypeSQLServer-4]
 	_ = x[DBTypeOracle-5]
+	_ = x[DBTypeKingbase-7]
 }
 
 const _DBType_name = "DBTypeUnknownDBTypeMySQLDBTypePostgreSQLDBTypeSQLServerDBTypeOracle"
@@ -37,6 +38,9 @@ const _DBType_name = "DBTypeUnknownDBTypeMySQLDBTypePostgreSQLDBTypeSQLServerDBT
 var _DBType_index = [...]uint8{0, 13, 24, 40, 55, 67}
 
 func (i DBType) String() string {
+	if i == DBTypeKingbase {
+		return "DBTypeKingbase"
+	}
 	i -= 1
 	if i < 0 || i >= DBType(len(_DBType_index)-1) {
 		return "DBType(" + strconv.FormatInt(int64(i+1), 10) + ")"

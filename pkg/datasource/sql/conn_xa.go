@@ -551,8 +551,11 @@ func (c *XAConn) Commit(ctx context.Context) error {
 		return c.commitErrorHandle(ctx)
 	}
 
-	if c.xaResource.XAPrepare(ctx, c.xaBranchXid.String()) != nil {
-		return c.commitErrorHandle(ctx)
+	if prepareErr := c.xaResource.XAPrepare(ctx, c.xaBranchXid.String()); prepareErr != nil {
+		if cleanupErr := c.commitErrorHandle(ctx); cleanupErr != nil {
+			return fmt.Errorf("xa prepare failed: %w", errors.Join(prepareErr, cleanupErr))
+		}
+		return fmt.Errorf("xa prepare failed: %w", prepareErr)
 	}
 
 	c.prepareTime = time.Now()

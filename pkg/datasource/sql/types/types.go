@@ -92,6 +92,8 @@ const (
 	IndexFullText
 )
 
+const DBTypeKingbase DBType = 7
+
 func ParseDBType(driverName string) DBType {
 	switch strings.ToLower(driverName) {
 	case "mysql":
@@ -104,6 +106,8 @@ func ParseDBType(driverName string) DBType {
 		return DBTypeSQLServer
 	case "mariadb":
 		return DBTypeMARIADB
+	case "kingbase", "kingbasees", "gokb", "seata-xa-kingbase":
+		return DBTypeKingbase
 	default:
 		return DBTypeUnknown
 	}
