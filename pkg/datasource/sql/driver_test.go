@@ -151,3 +151,36 @@ func Test_seataXADriver_OpenConnector(t *testing.T) {
 	_, ok := fieldVal.(*seataXAConnector)
 	assert.True(t, ok, "need return seata xa connector")
 }
+
+func TestOracleXADriverRegistrationAndMetadata(t *testing.T) {
+	dsn := "oracle://seata:secret@127.0.0.1:1521/FREEPDB1?timeout=5"
+
+	assert.Contains(t, sql.Drivers(), SeataXAOracleDriver)
+	meta, err := parseConnectorMetadata(dsn, types.DBTypeOracle)
+	assert.NoError(t, err)
+	assert.Equal(t, "FREEPDB1", meta.dbName)
+
+	resourceID := parseOracleResourceID(dsn)
+	assert.Equal(t, "oracle://127.0.0.1:1521/FREEPDB1", resourceID)
+	assert.NotContains(t, resourceID, "secret")
+	assert.Nil(t, oracleDriverDescriptor.newTableMetaCache, "Oracle XA must not register an AT metadata cache")
+}
+
+func TestOracleXADriverOpenConnector(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockMgr := initMockResourceManager(branch.BranchTypeXA, ctrl)
+	_ = mockMgr
+
+	db, err := sql.Open(SeataXAOracleDriver, "oracle://seata:secret@127.0.0.1:1521/FREEPDB1")
+	assert.NoError(t, err)
+	defer db.Close()
+
+	v := reflect.ValueOf(db).Elem()
+	fieldVal := reflectx.GetUnexportedField(v.FieldByName("connector"))
+	connector, ok := fieldVal.(*seataXAConnector)
+	assert.True(t, ok)
+	assert.Equal(t, types.DBTypeOracle, connector.dbType)
+	assert.Equal(t, "FREEPDB1", connector.dbName)
+	assert.Equal(t, "oracle", connector.targetName)
+	assert.Equal(t, "oracle://127.0.0.1:1521/FREEPDB1", connector.res.resourceID)
+}

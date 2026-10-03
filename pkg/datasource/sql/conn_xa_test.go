@@ -261,6 +261,39 @@ func newMockXAConn(t *testing.T, ctrl *gomock.Controller, branchID int64) (*XACo
 	}, mockMgr
 }
 
+type readOnlyPrepareXAResource struct {
+	xa.XAResource
+}
+
+func (r *readOnlyPrepareXAResource) End(context.Context, string, int) error { return nil }
+
+func (r *readOnlyPrepareXAResource) XAPrepare(context.Context, string) error { return xa.ErrXAReadOnly }
+
+func TestXAConnCommitReadOnlyPrepareSkipsFailureRollback(t *testing.T) {
+	previousCache := branchStatusCache
+	branchStatusCache = gcache.New(16).LRU().Expiration(time.Minute).Build()
+	defer func() { branchStatusCache = previousCache }()
+
+	previousTimeout := xaConnTimeout
+	xaConnTimeout = time.Minute
+	defer func() { xaConnTimeout = previousTimeout }()
+
+	conn := &XAConn{
+		Conn: &Conn{
+			res:   &DBResource{dbType: types.DBTypeOracle},
+			txCtx: types.NewTxCtx(),
+		},
+		xaResource:         &readOnlyPrepareXAResource{},
+		xaBranchXid:        XaIdBuild("global-xid", 7),
+		xaActive:           true,
+		branchRegisterTime: time.Now(),
+	}
+
+	assert.NoError(t, conn.Commit(context.Background()))
+	assert.False(t, conn.xaActive)
+	assert.Nil(t, conn.xaBranchXid, "read-only branches do not need a phase-two connection hold")
+}
+
 func TestXAConn_ShouldBeHeld(t *testing.T) {
 	tests := []struct {
 		name         string

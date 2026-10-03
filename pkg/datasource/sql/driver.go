@@ -24,12 +24,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	go_ora "github.com/sijms/go-ora/v2"
 
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/datasource"
 	mysql2 "seata.apache.org/seata-go/v2/pkg/datasource/sql/datasource/mysql"
@@ -49,12 +53,15 @@ const (
 	SeataXAMySQLDriver = "seata-xa-mysql"
 	// SeataXAPostgresDriver PostgreSQL driver for XA mode
 	SeataXAPostgresDriver = "seata-xa-postgres"
+	// SeataXAOracleDriver Oracle driver for XA mode
+	SeataXAOracleDriver = "seata-xa-oracle"
 )
 
 type driverDescriptor struct {
 	dbType            types.DBType
 	target            driver.Driver
 	parseDBName       func(dsn string) (string, error)
+	resourceID        func(dsn string) string
 	newTableMetaCache func(db *sql.DB, dbName string) datasource.TableMetaCache
 }
 
@@ -74,6 +81,12 @@ var (
 		newTableMetaCache: func(db *sql.DB, dbName string) datasource.TableMetaCache {
 			return postgres2.NewTableMetaInstance(db, dbName)
 		},
+	}
+	oracleDriverDescriptor = driverDescriptor{
+		dbType:      types.DBTypeOracle,
+		target:      go_ora.GetDefaultDriver(),
+		parseDBName: parseOracleDBName,
+		resourceID:  parseOracleResourceID,
 	}
 )
 
@@ -113,6 +126,16 @@ func initDriver() {
 			descriptor: postgresDriverDescriptor,
 			target:     stdlib.GetDefaultDriver(),
 			targetName: "pgx",
+		},
+	})
+
+	sql.Register(SeataXAOracleDriver, &seataXADriver{
+		seataDriver: &seataDriver{
+			branchType: branch.BranchTypeXA,
+			transType:  types.XAMode,
+			descriptor: oracleDriverDescriptor,
+			target:     go_ora.GetDefaultDriver(),
+			targetName: "oracle",
 		},
 	})
 }
@@ -203,8 +226,12 @@ func (d *seataDriver) getOpenConnectorProxy(connector driver.Connector, dbType t
 	if err != nil {
 		return nil, fmt.Errorf("parse db name: %w", err)
 	}
+	resourceID := parseResourceID(dataSourceName)
+	if d.descriptor.resourceID != nil {
+		resourceID = d.descriptor.resourceID(dataSourceName)
+	}
 	options := []dbOption{
-		withResourceID(parseResourceID(dataSourceName)),
+		withResourceID(resourceID),
 		withTarget(db),
 		withBranchType(d.branchType),
 		withDBType(dbType),
@@ -218,7 +245,9 @@ func (d *seataDriver) getOpenConnectorProxy(connector driver.Connector, dbType t
 		return nil, err
 	}
 
-	datasource.RegisterTableCache(dbType, d.descriptor.newTableMetaCache(db, dbName))
+	if d.descriptor.newTableMetaCache != nil {
+		datasource.RegisterTableCache(dbType, d.descriptor.newTableMetaCache(db, dbName))
+	}
 	if err = datasource.GetDataSourceManager(d.branchType).RegisterResource(res); err != nil {
 		log.Errorf("register resource: %v", err)
 		return nil, err
@@ -252,6 +281,52 @@ func parsePostgresDBName(dsn string) (string, error) {
 	return cfg.Database, nil
 }
 
+func parseOracleDBName(dsn string) (string, error) {
+	cfg, err := go_ora.ParseConfig(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse oracle dsn: %w", err)
+	}
+	if cfg.ServiceName != "" {
+		return cfg.ServiceName, nil
+	}
+	if cfg.SID != "" {
+		return cfg.SID, nil
+	}
+	return cfg.DBName, nil
+}
+
+// parseOracleResourceID builds a stable service identifier without including
+// the username, password, or connection options in the resource ID reported to
+// the transaction coordinator.
+func parseOracleResourceID(dsn string) string {
+	cfg, err := go_ora.ParseConfig(dsn)
+	if err == nil {
+		addresses := make([]string, 0, len(cfg.Servers))
+		for _, server := range cfg.Servers {
+			addresses = append(addresses, net.JoinHostPort(server.Addr, strconv.Itoa(server.Port)))
+		}
+		service := cfg.ServiceName
+		if service == "" {
+			service = cfg.SID
+		}
+		if service == "" {
+			service = cfg.DBName
+		}
+		return "oracle://" + strings.Join(addresses, "|") + "/" + service
+	}
+
+	// Preserve a useful identifier for malformed DSNs while redacting credentials.
+	u, urlErr := url.Parse(dsn)
+	if urlErr != nil {
+		return "oracle://invalid"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	return strings.ReplaceAll(u.String(), ",", "|")
+}
+
 func (d *seataDriver) getTargetDriverName() string {
 	return d.targetName
 }
@@ -274,6 +349,12 @@ func parseConnectorMetadata(dataSourceName string, dbType types.DBType) (*connec
 			return nil, fmt.Errorf("parse postgres dsn: %w", err)
 		}
 		return &connectorMetadata{dbName: cfg.Database}, nil
+	case types.DBTypeOracle:
+		dbName, err := parseOracleDBName(dataSourceName)
+		if err != nil {
+			return nil, err
+		}
+		return &connectorMetadata{dbName: dbName}, nil
 	default:
 		return nil, fmt.Errorf("unsupported connector metadata for db type %s", dbType.String())
 	}

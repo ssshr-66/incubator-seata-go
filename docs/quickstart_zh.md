@@ -295,4 +295,34 @@ db, err := sql.Open(
 
 > PostgreSQL XA 依赖 prepared transaction，使用前需要在 PostgreSQL 服务端开启 `max_prepared_transactions > 0`。
 
+如果使用 Oracle XA，可通过 `seata-xa-oracle` 驱动和 go-ora DSN 连接：
+
+```go
+db, err := sql.Open(
+	"seata-xa-oracle",
+	"oracle://seata:password@127.0.0.1:1521/FREEPDB1",
+)
+```
+
+Oracle 账号需要执行 `SYS.DBMS_XA` 并读取待恢复 XA 分支的权限：
+
+```sql
+GRANT EXECUTE ON SYS.DBMS_XA TO seata;
+GRANT SELECT ON SYS.DBA_PENDING_TRANSACTIONS TO seata;
+```
+
+适配器通过 Oracle `DBMS_XA` 包执行 XA 操作，并从
+`DBA_PENDING_TRANSACTIONS` 恢复事务分支。如果账号需要处理由其他 Oracle
+用户创建的分支，还可能需要 `FORCE ANY TRANSACTION` 系统权限；仅在部署确实
+需要时授予。
+
+Oracle XA 自动化覆盖使用 mock driver connection；当前项目不包含 Oracle 专属的
+数据库集成测试。项目尚未验证所有 Oracle 服务端版本和 go-ora 配置的兼容性；
+在生产使用前，应在目标环境确认 Oracle 版本、PDB/service 和授权配置。
+
+如果恢复时报 `ORA-01031`，请检查账号对 `DBA_PENDING_TRANSACTIONS` 的访问权限。
+如果 XA 操作返回 `XAER_PROTO`，请确认分支在 prepare 或二阶段操作前已经结束，且
+同一分支使用同一个资源管理器。手动处理 Oracle 待决事务前，应先确保 TC/RM 恢复
+流程可用。
+
 > 完整示例可参考：[XA 模式示例](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic)。

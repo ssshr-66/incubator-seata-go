@@ -551,7 +551,16 @@ func (c *XAConn) Commit(ctx context.Context) error {
 		return c.commitErrorHandle(ctx)
 	}
 
-	if c.xaResource.XAPrepare(ctx, c.xaBranchXid.String()) != nil {
+	prepareErr := c.xaResource.XAPrepare(ctx, c.xaBranchXid.String())
+	if errors.Is(prepareErr, xa.ErrXAReadOnly) {
+		// XA_RDONLY means Oracle has already completed this branch and there is
+		// no prepared state to retain for phase two. The TC still has the branch
+		// registration, so Oracle's phase-two adapter treats its XAER_NOTA as an
+		// idempotent completion.
+		c.cleanXABranchContext()
+		return nil
+	}
+	if prepareErr != nil {
 		return c.commitErrorHandle(ctx)
 	}
 

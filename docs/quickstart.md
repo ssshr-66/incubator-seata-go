@@ -295,4 +295,37 @@ db, err := sql.Open(
 
 > PostgreSQL XA relies on prepared transactions. Set `max_prepared_transactions > 0` on the PostgreSQL server before using this mode.
 
+For Oracle XA, use `seata-xa-oracle` with a go-ora DSN:
+
+```go
+db, err := sql.Open(
+	"seata-xa-oracle",
+	"oracle://seata:password@127.0.0.1:1521/FREEPDB1",
+)
+```
+
+The Oracle account needs permission to execute `SYS.DBMS_XA` and read pending XA branches:
+
+```sql
+GRANT EXECUTE ON SYS.DBMS_XA TO seata;
+GRANT SELECT ON SYS.DBA_PENDING_TRANSACTIONS TO seata;
+```
+
+The adapter uses Oracle's `DBMS_XA` package for XA operations and
+`DBA_PENDING_TRANSACTIONS` for recovery. The account may also need `FORCE ANY
+TRANSACTION` when it must complete branches created by a different Oracle
+user. Grant this system privilege only when the deployment requires it.
+
+Automated Oracle XA coverage uses mocked driver connections; this project does
+not include an Oracle-specific database integration test. Oracle XA behavior
+has not been verified for every Oracle server or go-ora configuration. Validate
+the selected Oracle version, PDB/service, and grants in your deployment before
+using Oracle XA in production.
+
+If recovery reports `ORA-01031`, verify access to `DBA_PENDING_TRANSACTIONS`.
+If an XA operation reports `XAER_PROTO`, check that the branch was ended before
+prepare or phase two and that the same resource manager is used for each
+branch. Keep the TC and RM recovery path available before manually resolving
+pending Oracle transactions.
+
 > Full example: [XA Example](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic).

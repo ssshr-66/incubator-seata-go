@@ -125,6 +125,13 @@ func (db *DBResource) GetResourceGroupId() string {
 }
 
 func (db *DBResource) init() {
+	// Oracle's server version is not used by XA resource handling. Avoid the
+	// MySQL/PostgreSQL SELECT VERSION() probe, which is not valid Oracle SQL,
+	// and keep sql.Open lazy for Oracle applications.
+	if db.dbType == types.DBTypeOracle {
+		return
+	}
+
 	ctx := context.Background()
 	conn, err := db.connector.Connect(ctx)
 	if err != nil {

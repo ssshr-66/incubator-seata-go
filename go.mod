@@ -123,6 +123,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/pelletier/go-toml v1.9.3 // indirect
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354 // indirect
+	github.com/sijms/go-ora/v2 v2.9.0
 	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/net v0.23.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect
