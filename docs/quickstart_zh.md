@@ -284,6 +284,17 @@ db, err := sql.Open(
 )
 ```
 
+如果使用 MariaDB XA，请使用专用驱动名 `seata-xa-mariadb`，DSN 格式与 MySQL 兼容：
+
+```go
+db, err := sql.Open(
+	"seata-xa-mariadb",
+	"root:password@tcp(127.0.0.1:3306)/seata_demo?charset=utf8mb4&parseTime=True&multiStatements=true",
+)
+```
+
+MariaDB XA 要求业务表使用 InnoDB 等支持事务的存储引擎；MariaDB Galera Cluster 不支持 XA。当前变更实际验证的组合是 MariaDB 10.5.29、10.11.19 与 `go-sql-driver/mysql` v1.6.0。验证覆盖公开驱动的显式事务、自动提交语句、查询 Rows 关闭、二阶段提交/回滚、XA 恢复扫描，以及原物理连接关闭后由新物理连接执行二阶段回调。MariaDB 服务端重启后，prepared 分支仍能通过 `XA RECOVER` 找到并完成提交或回滚。尚未通过包含 Seata RM 或 TC 进程重启的端到端场景验证自动恢复。
+
 如果使用 PostgreSQL XA，可使用基于 pgx 的驱动 `seata-xa-postgres`：
 
 ```go
@@ -294,5 +305,7 @@ db, err := sql.Open(
 ```
 
 > PostgreSQL XA 依赖 prepared transaction，使用前需要在 PostgreSQL 服务端开启 `max_prepared_transactions > 0`。
+
+如需检查 MariaDB 中待决的分支，可执行 `XA RECOVER`。只有确认对应全局事务的最终结果后，才应处理返回的 XID。数据库恢复扫描本身不会触发 Seata-Go RM 的自动恢复。
 
 > 完整示例可参考：[XA 模式示例](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic)。

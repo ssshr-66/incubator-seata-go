@@ -47,6 +47,8 @@ const (
 	SeataATPostgresDriver = "seata-at-postgres"
 	// SeataXAMySQLDriver MySQL driver for XA mode
 	SeataXAMySQLDriver = "seata-xa-mysql"
+	// SeataXAMariaDBDriver MariaDB driver for XA mode
+	SeataXAMariaDBDriver = "seata-xa-mariadb"
 	// SeataXAPostgresDriver PostgreSQL driver for XA mode
 	SeataXAPostgresDriver = "seata-xa-postgres"
 )
@@ -61,6 +63,14 @@ type driverDescriptor struct {
 var (
 	mySQLDriverDescriptor = driverDescriptor{
 		dbType:      types.DBTypeMySQL,
+		target:      mysql.MySQLDriver{},
+		parseDBName: parseMySQLDBName,
+		newTableMetaCache: func(db *sql.DB, dbName string) datasource.TableMetaCache {
+			return mysql2.NewTableMetaInstance(db, &mysql.Config{DBName: dbName})
+		},
+	}
+	mariaDBDriverDescriptor = driverDescriptor{
+		dbType:      types.DBTypeMARIADB,
 		target:      mysql.MySQLDriver{},
 		parseDBName: parseMySQLDBName,
 		newTableMetaCache: func(db *sql.DB, dbName string) datasource.TableMetaCache {
@@ -101,6 +111,16 @@ func initDriver() {
 			branchType: branch.BranchTypeXA,
 			transType:  types.XAMode,
 			descriptor: mySQLDriverDescriptor,
+			target:     mysql.MySQLDriver{},
+			targetName: "mysql",
+		},
+	})
+
+	sql.Register(SeataXAMariaDBDriver, &seataXADriver{
+		seataDriver: &seataDriver{
+			branchType: branch.BranchTypeXA,
+			transType:  types.XAMode,
+			descriptor: mariaDBDriverDescriptor,
 			target:     mysql.MySQLDriver{},
 			targetName: "mysql",
 		},
@@ -266,6 +286,12 @@ func parseConnectorMetadata(dataSourceName string, dbType types.DBType) (*connec
 		cfg, err := mysql.ParseDSN(dataSourceName)
 		if err != nil {
 			return nil, fmt.Errorf("parse mysql dsn: %w", err)
+		}
+		return &connectorMetadata{dbName: cfg.DBName}, nil
+	case types.DBTypeMARIADB:
+		cfg, err := mysql.ParseDSN(dataSourceName)
+		if err != nil {
+			return nil, fmt.Errorf("parse mariadb dsn: %w", err)
 		}
 		return &connectorMetadata{dbName: cfg.DBName}, nil
 	case types.DBTypePostgreSQL:

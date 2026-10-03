@@ -284,6 +284,17 @@ db, err := sql.Open(
 )
 ```
 
+For MariaDB XA, use the dedicated driver name `seata-xa-mariadb` with the MySQL-compatible DSN format:
+
+```go
+db, err := sql.Open(
+	"seata-xa-mariadb",
+	"root:password@tcp(127.0.0.1:3306)/seata_demo?charset=utf8mb4&parseTime=True&multiStatements=true",
+)
+```
+
+MariaDB XA requires transactional tables such as InnoDB. MariaDB Galera Cluster is not supported for XA. The combinations verified by this change are MariaDB 10.5.29 and 10.11.19 with `go-sql-driver/mysql` v1.6.0. Verification covers the public driver flow for explicit transactions, autocommit statements, query rows closing, and phase-two commit/rollback; XA recovery scans; and phase-two callbacks on a new physical connection after the original connection closes. Prepared branches also remained visible to `XA RECOVER` after a MariaDB server restart and were then committed or rolled back. Automatic recovery after a Seata RM or TC process restart has not been verified as an end-to-end scenario.
+
 For PostgreSQL XA, use the pgx-based driver `seata-xa-postgres`:
 
 ```go
@@ -294,5 +305,7 @@ db, err := sql.Open(
 ```
 
 > PostgreSQL XA relies on prepared transactions. Set `max_prepared_transactions > 0` on the PostgreSQL server before using this mode.
+
+To inspect in-doubt MariaDB branches, run `XA RECOVER`. Resolve a returned XID only after confirming the corresponding global transaction outcome. The database recovery scan does not by itself trigger Seata-Go RM recovery.
 
 > Full example: [XA Example](https://github.com/apache/incubator-seata-go-samples/tree/main/xa/basic).

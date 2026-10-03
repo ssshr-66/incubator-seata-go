@@ -43,6 +43,7 @@ var (
 
 func Init() {
 	exec.RegisterATExecutor(types.DBTypeMySQL, func() exec.SQLExecutor { return &ATExecutor{} })
+	exec.RegisterATExecutor(types.DBTypeMARIADB, func() exec.SQLExecutor { return &ATExecutor{} })
 	exec.RegisterATExecutor(types.DBTypePostgreSQL, func() exec.SQLExecutor { return &postgresATExecutor{} })
 }
 
